@@ -6,11 +6,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
-
-type TestFunc func(*testing.T)
 
 func Test_GetHash(t *testing.T) {
 	type test struct {
@@ -26,9 +27,7 @@ func Test_GetHash(t *testing.T) {
 
 	for _, testItem := range tests {
 		t.Run(testItem.text, func(t *testing.T) {
-			if r := getHash(testItem.text); r != testItem.expected {
-				t.Errorf("expected %v, got %v\n", testItem.expected, r)
-			}
+			assertEqual(t, getHash(testItem.text), testItem.expected)
 		})
 	}
 }
@@ -36,32 +35,15 @@ func Test_GetHash(t *testing.T) {
 func Test_Init(t *testing.T) {
 	a := Init("password")
 
-	expectedHash := "5baa61e4c9b93f3f0682250b6cf8331b7ee68fd8"
-	if a.hash != expectedHash {
-		t.Errorf("expected %v, got %v\n", a.hash, expectedHash)
-	}
-
-	if a.loginURL != "/login" {
-		t.Errorf("expected /login, got %v\n", a.loginURL)
-	}
-
-	if a.afterLogin != "/" {
-		t.Errorf("expected /, got %v\n", a.afterLogin)
-	}
-
-	if a.nextParam != "next" {
-		t.Errorf("expected next, got %v\n", a.nextParam)
-	}
-
-	if a.cookieName != "user" {
-		t.Errorf("expected user, got %v\n", a.cookieName)
-	}
+	assertEqual(t, a.hash, "5baa61e4c9b93f3f0682250b6cf8331b7ee68fd8")
+	assertEqual(t, a.loginURL, "/login")
+	assertEqual(t, a.afterLogin, "/")
+	assertEqual(t, a.nextParam, "next")
+	assertEqual(t, a.cookieName, "user")
 }
 
 func Test_Login(t *testing.T) {
 	a := Init("password")
-	expectedHash := "5baa61e4c9b93f3f0682250b6cf8331b7ee68fd8"
-
 	w := httptest.NewRecorder()
 
 	a.Login(w, a.hash)
@@ -69,31 +51,15 @@ func Test_Login(t *testing.T) {
 	// Get the cookie from the ResponseWriter.
 	cookie := w.Result().Cookies()[0]
 
-	// Check cookie values.
-	if cookie.Name != "user" {
-		t.Errorf("expected user, got %v\n", cookie.Name)
-	}
-
-	if cookie.Value != expectedHash {
-		t.Errorf("expected %v, got %v\n", expectedHash, cookie.Value)
-	}
-
-	if cookie.MaxAge != 14400 {
-		t.Errorf("expected 14400, got %v\n", cookie.MaxAge)
-	}
-
-	if !cookie.HttpOnly {
-		t.Errorf("expected true, got %v\n", cookie.HttpOnly)
-	}
-
-	if cookie.SameSite != http.SameSiteStrictMode {
-		t.Errorf("expected %v, got %v\n", http.SameSiteStrictMode, cookie.SameSite)
-	}
+	assertEqual(t, cookie.Name, "user")
+	assertEqual(t, cookie.Value, "5baa61e4c9b93f3f0682250b6cf8331b7ee68fd8")
+	assertEqual(t, cookie.MaxAge, 14400)
+	assertEqual(t, cookie.HttpOnly, true)
+	assertEqual(t, cookie.SameSite, http.SameSiteStrictMode)
 }
 
 func Test_Logout(t *testing.T) {
 	a := Init("password")
-
 	w := httptest.NewRecorder()
 
 	a.Logout(w)
@@ -102,81 +68,54 @@ func Test_Logout(t *testing.T) {
 	cookie := w.Result().Cookies()[0]
 
 	// Check cookie values.
-	if cookie.Name != "user" {
-		t.Errorf("expected user, got %v\n", cookie.Name)
-	}
-
-	if cookie.Value != "" {
-		t.Errorf("expected empty string, got %v\n", cookie.Value)
-	}
-
-	if cookie.MaxAge != -1 {
-		t.Errorf("expected -1, got %v\n", cookie.MaxAge)
-	}
-
-	if !cookie.HttpOnly {
-		t.Errorf("expected true, got %v\n", cookie.HttpOnly)
-	}
-
-	if cookie.SameSite != http.SameSiteStrictMode {
-		t.Errorf("expected %v, got %v\n", http.SameSiteStrictMode, cookie.SameSite)
-	}
+	assertEqual(t, cookie.Name, "user")
+	assertEqual(t, cookie.Value, "")
+	assertEqual(t, cookie.MaxAge, -1)
+	assertEqual(t, cookie.HttpOnly, true)
+	assertEqual(t, cookie.SameSite, http.SameSiteStrictMode)
 }
 
 func Test_IsAuthenticated(t *testing.T) {
 	a := Init("password")
-
-	// Perform the login.
 	w := httptest.NewRecorder()
+
 	a.Login(w, a.hash)
 
-	// Add the cookie to an http.Request object.
+	// Add cookie to the Request.
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.AddCookie(w.Result().Cookies()[0])
 
-	loggedIn := a.IsAuthenticated(r)
-	if !loggedIn {
-		t.Errorf("expected true, got %v\n", loggedIn)
-	}
+	assertEqual(t, a.IsAuthenticated(r), true)
 }
 
 func Test_IsAuthenticated__fails_when_cookie_not_set(t *testing.T) {
 	a := Init("password")
-
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 
-	loggedIn := a.IsAuthenticated(r)
-	if loggedIn {
-		t.Errorf("expected false, got %v\n", loggedIn)
-	}
+	assertEqual(t, a.IsAuthenticated(r), false)
 }
 
 func Test_IsAuthenticated__fails_when_hash_mismatch(t *testing.T) {
 	a := Init("password")
-
-	// Perform the login.
 	w := httptest.NewRecorder()
+
 	a.Login(w, a.hash)
 
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
-
-	// Set bad value, and add cookie to request.
+	// Set bad cookie value.
 	cookie := w.Result().Cookies()[0]
 	cookie.Value = "bad-hash"
+
+	// Add cookie to the Request.
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.AddCookie(cookie)
 
-	loggedIn := a.IsAuthenticated(r)
-	if loggedIn {
-		t.Errorf("expected false, got %v\n", loggedIn)
-	}
+	assertEqual(t, a.IsAuthenticated(r), false)
 }
 
 func Test_LoginFormHTML(t *testing.T) {
 	a := Init("password")
-
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 
-	loginForm := a.LoginFormHTML(r)
 	expectedLoginForm := `
 		<form class="login-form" method="post" action="/login">
 			<input type="password" placeholder="password" name="password">
@@ -184,22 +123,20 @@ func Test_LoginFormHTML(t *testing.T) {
 			<button type="submit">Login</button>
 		</form>`
 
-	if compress(loginForm) != compress(expectedLoginForm) {
-		t.Errorf("expected %v\n, got %v\n", expectedLoginForm, loginForm)
-	}
+	loginForm := a.LoginFormHTML(r)
+
+	assertEqual(t, compress(loginForm), compress(expectedLoginForm))
 }
 
 func Test_LoginFormHTML__custom_next_param(t *testing.T) {
 	a := Init("password")
-
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 
-	// Query params
+	// Add query params to the Request.
 	q := url.Values{}
 	q.Add("next", "/dashboard")
 	r.URL.RawQuery = q.Encode()
 
-	loginForm := a.LoginFormHTML(r)
 	expectedLoginForm := `
 		<form class="login-form" method="post" action="/login">
 			<input type="password" placeholder="password" name="password">
@@ -207,9 +144,9 @@ func Test_LoginFormHTML__custom_next_param(t *testing.T) {
 			<button type="submit">Login</button>
 		</form>`
 
-	if compress(loginForm) != compress(expectedLoginForm) {
-		t.Errorf("expected %v\n, got %v\n", expectedLoginForm, loginForm)
-	}
+	loginForm := a.LoginFormHTML(r)
+
+	assertEqual(t, compress(loginForm), compress(expectedLoginForm))
 }
 
 func Test_LoginFormHTML__rendering_error(t *testing.T) {
@@ -220,17 +157,13 @@ func Test_LoginFormHTML__rendering_error(t *testing.T) {
 
 	loginForm := a.LoginFormHTML(r)
 
-	if loginForm != "" {
-		t.Errorf("expected empty string, got %v\n", loginForm)
-	}
+	assertEqual(t, loginForm, "")
 }
 
 func Test_HandleLogin_Get(t *testing.T) {
 	a := Init("password")
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
-
-	http.HandlerFunc(a.HandleLogin).ServeHTTP(w, r)
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
 
 	expectedLoginForm := `
 		<html>
@@ -241,21 +174,20 @@ func Test_HandleLogin_Get(t *testing.T) {
 		</form>
 		</html>`
 
-	body := w.Body.String()
+	http.HandlerFunc(a.HandleLogin).ServeHTTP(w, r)
 
-	if compress(body) != compress(expectedLoginForm) {
-		t.Errorf("expected %v\n, got %v\n", expectedLoginForm, body)
-	}
+	body := w.Body.String()
+	assertEqual(t, compress(body), compress(expectedLoginForm))
 }
 
 func Test_HandleLogin_Get__already_authenticated(t *testing.T) {
 	a := Init("password")
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	ww := httptest.NewRecorder()
 
 	a.Login(ww, a.hash)
 
-	// Add the cookie to an http.Request object.
+	// Add cookie to the Request.
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.AddCookie(ww.Result().Cookies()[0])
 
 	w := httptest.NewRecorder()
@@ -263,56 +195,36 @@ func Test_HandleLogin_Get__already_authenticated(t *testing.T) {
 	http.HandlerFunc(a.HandleLogin).ServeHTTP(w, r)
 
 	// When user is already authenticated, navigating to the
-	// login URL should redirect them to the afterLogin URL
+	// login URL should redirect them to the afterLogin URL.
 
-	// Check redirect status code.
-	if w.Code != http.StatusFound {
-		t.Errorf("expected %v\n, got %v\n", http.StatusFound, w.Code)
-	}
+	assertEqual(t, w.Code, http.StatusFound)
 
 	// Check redirect url location
 	url, err := w.Result().Location()
-	if err != nil {
-		t.Errorf("error when getting response location: %v\n", err.Error())
-	}
-
-	if url.Path != a.afterLogin {
-		t.Errorf("expected %v\n, got %v\n", a.afterLogin, url.Path)
-	}
+	assertEqual(t, err, nil)
+	assertEqual(t, url.Path, a.afterLogin)
 }
 
 func Test_HandleLogin_Post(t *testing.T) {
 	a := Init("supersecret")
+	w := httptest.NewRecorder()
 
 	reader := strings.NewReader("password=supersecret")
 	r := httptest.NewRequest(http.MethodPost, "/", reader)
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	w := httptest.NewRecorder()
-
 	http.HandlerFunc(a.HandleLogin).ServeHTTP(w, r)
 
-	// Check redirect status code.
-	if w.Code != http.StatusFound {
-		t.Errorf("expected %v\n, got %v\n", http.StatusFound, w.Code)
-	}
+	assertEqual(t, w.Code, http.StatusFound)
 
 	// Check redirect url location
 	url, err := w.Result().Location()
-	if err != nil {
-		t.Errorf("error when getting response location: %v\n", err.Error())
-	}
-
-	if url.Path != a.afterLogin {
-		t.Errorf("expected %v\n, got %v\n", a.afterLogin, url.Path)
-	}
+	assertEqual(t, err, nil)
+	assertEqual(t, url.Path, a.afterLogin)
 
 	// Check cookie value
 	cookie := w.Result().Cookies()[0]
-
-	if cookie.Value != a.hash {
-		t.Errorf("expected %v\n, got %v\n", a.hash, cookie.Value)
-	}
+	assertEqual(t, cookie.Value, a.hash)
 }
 
 func Test_HandleLogin_Post__custom_next_param(t *testing.T) {
@@ -335,7 +247,7 @@ func Test_HandleLogin_Post__custom_next_param(t *testing.T) {
 			r := httptest.NewRequest(http.MethodPost, "/", reader)
 			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-			// Query params
+			// Add query params to the Request.
 			q := url.Values{}
 			q.Add("next", testItem.next)
 			r.URL.RawQuery = q.Encode()
@@ -344,27 +256,19 @@ func Test_HandleLogin_Post__custom_next_param(t *testing.T) {
 
 			http.HandlerFunc(a.HandleLogin).ServeHTTP(w, r)
 
-			// Check redirect status code.
-			if w.Code != http.StatusFound {
-				t.Errorf("expected %v\n, got %v\n", http.StatusFound, w.Code)
-			}
+			// When user is successfully authenticated, they should
+			// be redirected to the afterLogin destination.
+
+			assertEqual(t, w.Code, http.StatusFound)
 
 			// Check redirect url location
 			url, err := w.Result().Location()
-			if err != nil {
-				t.Errorf("error when getting response location: %v\n", err.Error())
-			}
-
-			if url.Path != testItem.redirLocation {
-				t.Errorf("expected %v\n, got %v\n", a.afterLogin, testItem.redirLocation)
-			}
+			assertEqual(t, err, nil)
+			assertEqual(t, url.Path, testItem.redirLocation)
 
 			// Check cookie value
 			cookie := w.Result().Cookies()[0]
-
-			if cookie.Value != a.hash {
-				t.Errorf("expected %v\n, got %v\n", a.hash, cookie.Value)
-			}
+			assertEqual(t, cookie.Value, a.hash)
 		}
 	}
 
@@ -377,106 +281,80 @@ func Test_HandleLogin_Post__custom_next_param(t *testing.T) {
 
 func Test_HandleLogin_Post__invalid_password(t *testing.T) {
 	a := Init("supersecret")
+	w := httptest.NewRecorder()
 
 	reader := strings.NewReader("password=badpassword")
 	r := httptest.NewRequest(http.MethodPost, "/", reader)
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	w := httptest.NewRecorder()
-
 	http.HandlerFunc(a.HandleLogin).ServeHTTP(w, r)
 
-	// Check redirect status code.
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected %v\n, got %v\n", http.StatusFound, w.Code)
-	}
+	assertEqual(t, w.Code, http.StatusBadRequest)
 }
 
 func Test_HandleLogout(t *testing.T) {
 	a := Init("password")
-	r := httptest.NewRequest(http.MethodPost, "/", nil)
 	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/", nil)
 
 	http.HandlerFunc(a.HandleLogout).ServeHTTP(w, r)
 
-	// Check redirect status code.
-	if w.Code != http.StatusFound {
-		t.Errorf("expected %v\n, got %v\n", http.StatusFound, w.Code)
-	}
+	assertEqual(t, w.Code, http.StatusFound)
 
 	// Check cookie value
 	cookie := w.Result().Cookies()[0]
-
-	if cookie.Value != "" {
-		t.Errorf("expected empty string, got %v\n", cookie.Value)
-	}
-
-	if cookie.MaxAge != -1 {
-		t.Errorf("expected empty -1, got %v\n", cookie.MaxAge)
-	}
+	assertEqual(t, cookie.Value, "")
+	assertEqual(t, cookie.MaxAge, -1)
 }
 
 func Test_Apply(t *testing.T) {
 	a := Init("password")
-	r := httptest.NewRequest(http.MethodPost, "/", nil)
 	ww := httptest.NewRecorder()
 
 	a.Login(ww, a.hash)
 
-	// Add the cookie to an http.Request object.
+	// Add cookie to the Request.
+	r := httptest.NewRequest(http.MethodPost, "/", nil)
 	r.AddCookie(ww.Result().Cookies()[0])
+
+	// Dummy handler that will be wrapped with the auth logic.
+	handlerReached := false
+	h := func(w http.ResponseWriter, r *http.Request) {
+		handlerReached = true
+	}
 
 	w := httptest.NewRecorder()
 
-	handlerReached := false
-
-	h := func(w http.ResponseWriter, r *http.Request) {
-		handlerReached = true
-		fmt.Fprint(w, "We're in!")
-	}
-
 	http.HandlerFunc(a.Apply(h)).ServeHTTP(w, r)
 
-	// Check redirect status code.
-	if w.Code != http.StatusOK {
-		t.Errorf("expected %v\n, got %v\n", http.StatusOK, w.Code)
-	}
-
-	if !handlerReached {
-		t.Errorf("expected true, got %v\n", handlerReached)
-	}
+	assertEqual(t, w.Code, http.StatusOK)
+	assertEqual(t, handlerReached, true)
 }
 
 func Test_Apply__auth_failed(t *testing.T) {
 	a := Init("password")
-	r := httptest.NewRequest(http.MethodPost, "/", nil)
 	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/", nil)
 
+	// Dummy handler that will be wrapped with the auth logic.
 	handlerReached := false
-
 	h := func(w http.ResponseWriter, r *http.Request) {
 		handlerReached = true
-		fmt.Fprint(w, "We're in!")
 	}
 
 	http.HandlerFunc(a.Apply(h)).ServeHTTP(w, r)
 
-	// Check redirect status code.
-	if w.Code != http.StatusFound {
-		t.Errorf("expected %v\n, got %v\n", http.StatusFound, w.Code)
-	}
-
-	if handlerReached {
-		t.Errorf("expected false, got %v\n", handlerReached)
-	}
+	assertEqual(t, w.Code, http.StatusFound)
+	assertEqual(t, handlerReached, false)
 }
 
 func Test_Routes(t *testing.T) {
 	a := Init("password")
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/", nil)
+
 	authRoutes := a.Routes()
 
-	r := httptest.NewRequest(http.MethodPost, "/", nil)
-	w := httptest.NewRecorder()
 	http.Handler(authRoutes).ServeHTTP(w, r)
 }
 
@@ -484,6 +362,9 @@ func Test_Routes(t *testing.T) {
 // Test Helpers
 // ------------------------------------------------------------------
 
+type TestFunc func(*testing.T)
+
+// compress removes whitespaces and newlines from the given text.
 func compress(text string) string {
 	s := []string{}
 
@@ -492,4 +373,16 @@ func compress(text string) string {
 	}
 
 	return strings.Join(s, "")
+}
+
+// assertEqual checks if values are equal.
+func assertEqual(t *testing.T, a interface{}, expected interface{}) {
+	if a == expected {
+		return
+	}
+
+	// Get the filename + line of where the assertion failed.
+	_, filename, line, _ := runtime.Caller(1)
+	fmt.Printf("%s:%d expected %v (type %v), got %v (type %v)\n", filepath.Base(filename), line, expected, reflect.TypeOf(expected), a, reflect.TypeOf(a))
+	t.FailNow()
 }
