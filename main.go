@@ -6,7 +6,7 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"github.com/TunedMystic/simple-auth-example/authsolo"
+	"github.com/TunedMystic/simple-auth-example/authmiddleware"
 )
 
 func indexHandler(w http.ResponseWriter, r *http.Request) {
@@ -51,7 +51,7 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	r := mux.NewRouter()
-	auth := authsolo.Init("mypassword")
+	auth := authmiddleware.Init("mypassword")
 
 	r.HandleFunc("/", indexHandler)
 	r.HandleFunc("/about", aboutHandler)
